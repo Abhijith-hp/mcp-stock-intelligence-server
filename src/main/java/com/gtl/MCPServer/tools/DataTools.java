@@ -6,7 +6,9 @@ import com.gtl.MCPServer.dto.CurrentRateResponse;
 import com.gtl.MCPServer.dto.HistoryDataResponse;
 import com.gtl.MCPServer.dto.InstrumentSearchResponse;
 import com.gtl.MCPServer.dto.SecurityRateResponse;
+import com.gtl.MCPServer.dto.StockRateResponse;
 import com.gtl.MCPServer.dto.StockRequest;
+import com.gtl.MCPServer.dto.ToolResponse;
 import com.gtl.MCPServer.service.APIServices;
 import com.gtl.MCPServer.utilities.AuthSessionManager;
 import com.gtl.MCPServer.utilities.HelperFunctions;
@@ -44,65 +46,154 @@ public class DataTools {
      /**
      * Tool A - Search instrument to get venueScriptCode
      */
-    @Tool(name = "searchInstruments", description = "Finds venueScriptCode using the security name.")
-    public String searchInstruments(String securityName) {
+    // @Tool(name = "searchInstruments", description = "Finds venueScriptCode using the security name.")
+    // public String searchInstruments(String securityName) {
        
-        Map<String, String> symbolMap = Map.of(
-            "infosys", "INFY",
-            "tcs", "TCS",
-            "reliance", "RELIANCE"
-        );
+    //     Map<String, String> symbolMap = Map.of(
+    //         "infosys", "NSE:INFY",
+    //         "tcs", "NSE:TCS",
+    //         "reliance", "NSE:RELIANCE"
+    //     );
 
-        String code = symbolMap.getOrDefault(securityName.toLowerCase(), null);
-        if (code == null) return null;
+    //     String code = symbolMap.getOrDefault(securityName.toLowerCase(), null);
+    //     if (code == null) return null;
 
-        return code;
-    }
+    //     return code;
+    // }
     
-    @Tool(name = "getCurrentRates", description = "Gets the current market rate of a security using venueScriptCode.")
-    public String getCurrentRates(String venueScriptCode) {
+    // @Tool(name = "getCurrentRates", description = "Gets the current market rate of a security using venueScriptCode.")
+    // public String getCurrentRates(List<String> venueScriptCode) {
+    //     StockRequest stockRequest = new StockRequest();
+       
+    //     Map<String, String> priceMap = Map.of(
+    //         "INFY", "₹1510.25",
+    //         "TCS", "₹3650.75",
+    //         "RELIANCE", "₹2890.50"
+    //     );
+
+    //     String rate = priceMap.getOrDefault(venueScriptCode, "Unavailable");
+    //     return "Current rate for " + venueScriptCode + " is " + rate;
+    // }
+
+//     @Tool(
+//     name = "searchInstrumentsBatch",
+//     description = "Finds venueCode and venueScriptCode for a list of security names."
+// )
+// public List<StockRequest> searchInstrumentsBatch(List<String> securityNames) {
+//     Map<String, String> symbolMap = Map.of(
+//         "infosys", "NSE:INFY",
+//         "tcs", "NSE:TCS",
+//         "reliance", "NSE:RELIANCE"
+//     );
+
+//     List<StockRequest> stockRequests = new ArrayList<>();
+
+//     for (String name : securityNames) {
+//         String fullCode = symbolMap.get(name.toLowerCase());
+
+//         if (fullCode != null && fullCode.contains(":")) {
+//             String[] parts = fullCode.split(":");
+//             stockRequests.add(new StockRequest(parts[0], parts[1]));
+//         }
+//     }
+
+//     return stockRequests;
+// }
+
+    @Tool(name = "getCurrentRates", description = "Gets the current market rate of securities using venueScriptCode and venueCode.")
+    public ToolResponse<List<StockRateResponse>> getCurrentRates(List<StockRequest> scripDetails,ToolContext toolContext) {
         
-        Map<String, String> priceMap = Map.of(
-            "INFY", "₹1510.25",
-            "TCS", "₹3650.75",
-            "RELIANCE", "₹2890.50"
-        );
+        try{
+          String clientName =  authSessionManager.getClientName(toolContext);
+          log.info("Client Name: " + clientName);
+          boolean chatServerClient = authSessionManager.isChartServerClient(clientName);
+          log.info("Is Chat Server Client: " + chatServerClient);
+          String sessionId = null;
+          if (chatServerClient) {
+            sessionId = clientName;
+            log.info("Session ID: From chat server client " + sessionId);
+          }else{
+            sessionId = authSessionManager.extractSessionFromContext(toolContext).getId();
+            log.info("Session ID: From out source application" +sessionId);
+          }
+         if (!sessionAuthRegistry.isAuthenticated(sessionId) && !chatServerClient) {
+            log.info("Server Session ID is not authenticated: " + sessionId);
+           return new ToolResponse<>(false,  "Unauthenticated Please login + helperFunctions.buildLoginUrl(sessionId)",null);
+     }else if (!sessionAuthRegistry.isAuthenticated(sessionId) && chatServerClient) {
+           return new ToolResponse<>(false,  "Unauthenticated Please login by refreshing browser:",null);
+         }   
+        
+        List<StockRateResponse> stockRateResponses = new ArrayList<>();
 
-        String rate = priceMap.getOrDefault(venueScriptCode, "Unavailable");
-        return "Current rate for " + venueScriptCode + " is " + rate;
-    }
+        if (scripDetails == null || scripDetails.isEmpty()) {
+            return new ToolResponse<>(false, "No security details provided.", stockRateResponses);
+        }
 
-    @Tool(
-  name = "getRatesForSecurityBatch",
-  description = "Takes a list of security names and returns their venueScriptCodes and current rates."
-)
-public List<SecurityRateResponse> getRatesForSecurities(List<String> securityNames) {
-    Map<String, String> symbolMap = Map.of(
-        "infosys", "INFY",
-        "tcs", "TCS",
-        "reliance", "RELIANCE"
-    );
+        for (StockRequest stock : scripDetails) {
+            if (stock.getVenuecode() == null || stock.getVenuescriptcode() == null) {
+                return new ToolResponse<>(false, "Invalid security details provided.", stockRateResponses);
+            }
+        }
 
-    Map<String, String> priceMap = Map.of(
-        "INFY", "₹1510.25",
-        "TCS", "₹3650.75",
-        "RELIANCE", "₹2890.50"
-    );
+        List<Map<String, Object>> responseList = apiService.getIntradayRates(scripDetails);
+        if (responseList == null || responseList.isEmpty()) {
+            return new ToolResponse<>(false, "No data found for the provided security.", stockRateResponses);
+        }
 
-    List<SecurityRateResponse> result = new ArrayList<>();
+        for (StockRequest stock : scripDetails) {
+            for (Map<String, Object> item : responseList) {
+                if (stock.getVenuescriptcode().equals(item.get("venuescriptcode"))) {
+                    stockRateResponses.add(new StockRateResponse(
+                        stock.getVenuescriptcode(),
+                        (String) item.get("venue"),
+                        (String) item.get("LastTradePrice"),
+                        (String) item.get("LastTradeTime")
+                    ));
+                    break;
+                }
+            }
+        }
 
-    for (String name : securityNames) {
-        String venueCode = symbolMap.get(name.toLowerCase());
-        if (venueCode != null) {
-            String price = priceMap.getOrDefault(venueCode, "Price unavailable");
-            result.add(new SecurityRateResponse(name, venueCode, price));
-        } else {
-            result.add(new SecurityRateResponse(name, "NOT_FOUND", "N/A"));
+        return new ToolResponse<>(true, "Rates fetched successfully", stockRateResponses);
+    }catch (Exception e) {
+            e.printStackTrace();
+            log.error("Error in getPortfolio tool: {}", e.getMessage());
+            return new ToolResponse<>(false, "An error occurred while fetching portfolio: " + e.getMessage(), null);
         }
     }
 
-    return result;
-}
+
+//     @Tool(
+//   name = "getRatesForSecurityBatch",
+//   description = "Takes a list of security names and returns their venueScriptCodes and current rates."
+// )
+// public List<SecurityRateResponse> getRatesForSecurities(List<String> securityNames) {
+//     Map<String, String> symbolMap = Map.of(
+//         "infosys", "INFY",
+//         "tcs", "TCS",
+//         "reliance", "RELIANCE"
+//     );
+
+//     Map<String, String> priceMap = Map.of(
+//         "INFY", "₹1510.25",
+//         "TCS", "₹3650.75",
+//         "RELIANCE", "₹2890.50"
+//     );
+
+//     List<SecurityRateResponse> result = new ArrayList<>();
+
+//     for (String name : securityNames) {
+//         String venueCode = symbolMap.get(name.toLowerCase());
+//         if (venueCode != null) {
+//             String price = priceMap.getOrDefault(venueCode, "Price unavailable");
+//             result.add(new SecurityRateResponse(name, venueCode, price));
+//         } else {
+//             result.add(new SecurityRateResponse(name, "NOT_FOUND", "N/A"));
+//         }
+//     }
+
+//     return result;
+// }
 
     // @Tool(
     //     name = "getHistoricalRates",
